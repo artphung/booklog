@@ -1267,22 +1267,43 @@ function submitManualIsbn() {
 // ═══════════════════════════════════════════════════
 async function handleBarcode(code) {
   showLoading('Looking up book…');
-  try {
-    const isbn = code.replace(/[^0-9X]/gi,'');
-    const url  = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`;
-    const res  = await fetch(url);
-    const data = await res.json();
+  const isbn = code.replace(/[^0-9X]/gi,'');
 
-    if (!data.items || data.items.length === 0) {
-      hideLoading();
-      toast('No book found for this ISBN', 'error');
-      return;
-    }
+  // Try Google Books first, then Open Library as fallback
+  let book = await lookupGoogleBooks(isbn);
+  if (!book) {
+    showLoading('Trying Open Library…');
+    book = await lookupOpenLibrary(isbn);
+  }
 
-    const vol  = data.items[0].volumeInfo;
+  hideLoading();
+
+  if (!book) {
+    // Nothing found — still let the user log it manually with the ISBN pre-filled
     currentBook = {
       isbn,
-      title:       vol.title || 'Unknown Title',
+      title: '', subtitle: '', authors: '', publisher: '',
+      published: '', description: '', genres: '',
+      pageCount: '', language: '', coverUrl: '', googleId: '',
+    };
+    toast('Book not found — fill in details manually', 'error');
+    showResultScreen();
+    return;
+  }
+
+  currentBook = book;
+  showResultScreen();
+}
+
+async function lookupGoogleBooks(isbn) {
+  try {
+    const res  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
+    const data = await res.json();
+    if (!data.items || data.items.length === 0) return null;
+    const vol = data.items[0].volumeInfo;
+    return {
+      isbn,
+      title:       vol.title || '',
       subtitle:    vol.subtitle || '',
       authors:     (vol.authors || []).join(', '),
       publisher:   vol.publisher || '',
@@ -1293,14 +1314,41 @@ async function handleBarcode(code) {
       language:    vol.language || '',
       coverUrl:    vol.imageLinks ? (vol.imageLinks.thumbnail || vol.imageLinks.smallThumbnail || '') : '',
       googleId:    data.items[0].id,
+      source:      'Google Books',
     };
+  } catch(e) { return null; }
+}
 
-    hideLoading();
-    showResultScreen();
-  } catch(err) {
-    hideLoading();
-    toast('Lookup failed — check connection', 'error');
-  }
+async function lookupOpenLibrary(isbn) {
+  try {
+    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+    const data = await res.json();
+    const key  = `ISBN:${isbn}`;
+    if (!data[key]) return null;
+    const b = data[key];
+
+    const authors   = (b.authors || []).map(a => a.name).join(', ');
+    const publisher = (b.publishers || []).map(p => p.name).join(', ');
+    const subjects  = (b.subjects || []).slice(0,3).map(s => s.name || s).join(', ');
+    const published = b.publish_date || '';
+    const coverUrl  = b.cover ? (b.cover.large || b.cover.medium || b.cover.small || '') : '';
+
+    return {
+      isbn,
+      title:       b.title || '',
+      subtitle:    b.subtitle || '',
+      authors,
+      publisher,
+      published,
+      description: b.notes ? (typeof b.notes === 'string' ? b.notes : b.notes.value || '') : '',
+      genres:      subjects,
+      pageCount:   b.number_of_pages ? String(b.number_of_pages) : '',
+      language:    '',
+      coverUrl,
+      googleId:    '',
+      source:      'Open Library',
+    };
+  } catch(e) { return null; }
 }
 
 // ═══════════════════════════════════════════════════
