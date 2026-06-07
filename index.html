@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BookLog">
+<meta name="theme-color" content="#0f0e0c">
+<title>BookLog</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+<!-- ZXing barcode library -->
+<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+
+<style>
+  :root {
+    --ink: #0f0e0c;
+    --paper: #f5f0e8;
+    --cream: #ede6d4;
+    --accent: #c8401a;
+    --accent-light: #e8b49a;
+    --gold: #b8922a;
+    --muted: #8a7f6e;
+    --scan-green: #2a9d5c;
+    --border: #d4c9b0;
+    --font-display: 'Playfair Display', Georgia, serif;
+    --font-mono: 'DM Mono', 'Courier New', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    overflow: hidden;
+  }
+
+  /* ── APP SHELL ── */
+  #app {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--ink);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* grain texture overlay */
+  #app::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.4;
+  }
+
+  /* ── SCREENS ── */
+  .screen {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    animation: fadeIn 0.3s ease;
+  }
+  .screen.active { display: flex; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── HEADER ── */
+  .header {
+    padding: 52px 24px 16px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+  }
+
+  .wordmark {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--paper);
+    line-height: 1;
+  }
+  .wordmark span { color: var(--accent); font-style: italic; }
+
+  .header-sub {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+
+  .settings-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--muted);
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    transition: all 0.2s;
+  }
+  .settings-btn:active { background: rgba(255,255,255,0.05); }
+
+  /* ── HOME SCREEN ── */
+  #homeScreen .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 0 100px;
+  }
+
+  .scan-hero {
+    margin: 28px 24px 0;
+    background: linear-gradient(135deg, #1a1916 0%, #231f1a 100%);
+    border: 1px solid rgba(200,64,26,0.2);
+    border-radius: 16px;
+    padding: 28px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .scan-hero::after {
+    content: '📚';
+    position: absolute;
+    right: 16px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 56px;
+    opacity: 0.12;
+  }
+
+  .scan-hero h2 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--paper);
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+  .scan-hero h2 em { color: var(--accent-light); font-style: italic; }
+
+  .scan-hero p {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+
+  .btn-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.15s;
+  }
+  .btn-primary:active { transform: scale(0.98); background: #a83416; }
+
+  .btn-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: transparent;
+    color: var(--paper);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.15s;
+    margin-top: 8px;
+  }
+  .btn-secondary:active { background: rgba(255,255,255,0.05); }
+
+  /* ── STATUS STRIP ── */
+  .status-strip {
+    margin: 16px 24px 0;
+    display: flex;
+    gap: 10px;
+  }
+  .status-pill {
+    flex: 1;
+    background: #1a1916;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .status-dot.ok { background: var(--scan-green); box-shadow: 0 0 6px var(--scan-green); }
+  .status-dot.err { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .status-label {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .status-val {
+    font-size: 10px;
+    color: var(--paper);
+    opacity: 0.7;
+    margin-left: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 90px;
+  }
+
+  /* ── RECENT SCANS ── */
+  .section-header {
+    padding: 24px 24px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .section-title {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .section-count {
+    font-size: 10px;
+    color: var(--gold);
+    letter-spacing: 0.06em;
+  }
+
+  .book-list { padding: 0 24px; }
+
+  .book-card {
+    display: flex;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    align-items: flex-start;
+  }
+  .book-card:last-child { border-bottom: none; }
+
+  .book-thumb {
+    width: 36px; height: 52px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    object-fit: cover;
+    background: #2a2620;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .book-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
+
+  .book-info { flex: 1; min-width: 0; }
+  .book-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    color: var(--paper);
+    line-height: 1.3;
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .book-author {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .book-badge {
+    display: inline-block;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(184,146,42,0.15);
+    color: var(--gold);
+    border: 1px solid rgba(184,146,42,0.25);
+  }
+
+  .book-meta-right {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .book-date {
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .notion-check {
+    font-size: 11px;
+    color: var(--scan-green);
+  }
+  .notion-check.pending { color: var(--muted); }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 24px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+    letter-spacing: 0.04em;
+  }
+  .empty-state .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ── SCANNER SCREEN ── */
+  #scanScreen {
+    background: #000;
+  }
+
+  #scanScreen .scanner-header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: 52px 20px 16px;
+    z-index: 10;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 100%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .back-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    backdrop-filter: blur(10px);
+    flex-shrink: 0;
+  }
+
+  .scanner-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    color: #fff;
+    font-weight: 400;
+  }
+
+  #video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* scan frame overlay */
+  .scan-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .scan-frame {
+    width: 260px;
+    height: 140px;
+    position: relative;
+  }
+
+  .scan-frame::before,
+  .scan-frame::after {
+    content: '';
+    position: absolute;
+    width: 28px; height: 28px;
+    border-color: #fff;
+    border-style: solid;
+    opacity: 0.9;
+  }
+  .scan-frame::before { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 3px 0 0 0; }
+  .scan-frame::after  { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 3px 0 0; }
+
+  .scan-frame-bottom::before,
+  .scan-frame-bottom::after {
+    content: '';
+    position: absolute;
+    width: 28px; height: 28px;
+    border-color: #fff;
+    border-style: solid;
+    opacity: 0.9;
+  }
+  .scan-frame-bottom::before { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 3px; }
+  .scan-frame-bottom::after  { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 3px 0; }
+
+  .scan-line {
+    position: absolute;
+    left: 10px; right: 10px;
+    height: 2px;
+    background: linear-gradient(to right, transparent, var(--accent) 20%, var(--accent) 80%, transparent);
+    animation: scanLine 2s ease-in-out infinite;
+    border-radius: 1px;
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  @keyframes scanLine {
+    0%   { top: 10px; opacity: 0.9; }
+    50%  { top: calc(100% - 12px); opacity: 0.9; }
+    100% { top: 10px; opacity: 0.9; }
+  }
+
+  .scan-hint {
+    position: absolute;
+    bottom: 40px;
+    left: 0; right: 0;
+    text-align: center;
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    font-family: var(--font-mono);
+  }
+
+  .manual-entry-btn {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+  }
+
+  /* ── RESULT SCREEN ── */
+  #resultScreen {
+    background: var(--ink);
+  }
+
+  #resultScreen .result-header {
+    padding: 52px 24px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+  }
+
+  .result-header-text {
+    flex: 1;
+  }
+  .result-header-text h2 {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--paper);
+  }
+  .result-header-text p {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  #resultScreen .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 24px 120px;
+  }
+
+  .book-preview {
+    display: flex;
+    gap: 16px;
+    padding: 20px 0;
+    align-items: flex-start;
+  }
+
+  .book-cover-large {
+    width: 80px;
+    height: 116px;
+    border-radius: 4px;
+    background: #2a2620;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px;
+    overflow: hidden;
+    box-shadow: 4px 4px 20px rgba(0,0,0,0.4);
+  }
+  .book-cover-large img { width: 100%; height: 100%; object-fit: cover; }
+
+  .book-preview-info { flex: 1; min-width: 0; }
+  .book-preview-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    line-height: 1.3;
+    color: var(--paper);
+    margin-bottom: 6px;
+  }
+  .book-preview-author {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .book-preview-genre {
+    display: inline-block;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: rgba(200,64,26,0.15);
+    color: var(--accent-light);
+    border: 1px solid rgba(200,64,26,0.25);
+    margin-bottom: 4px;
+    margin-right: 4px;
+  }
+
+  .field-group { margin-top: 4px; }
+  .field-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .field-row:last-child { border-bottom: none; }
+
+  .field-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    width: 90px;
+    flex-shrink: 0;
+    padding-top: 10px;
+  }
+
+  .field-input {
+    flex: 1;
+    background: #1a1916;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  .field-input:focus { border-color: rgba(200,64,26,0.4); }
+
+  textarea.field-input {
+    resize: none;
+    height: 80px;
+    line-height: 1.5;
+  }
+
+  .field-input.read-only {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .isbn-chip {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--gold);
+    background: rgba(184,146,42,0.1);
+    border: 1px solid rgba(184,146,42,0.2);
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+  }
+
+  /* bottom action bar */
+  .action-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: 16px 24px 36px;
+    background: linear-gradient(to top, var(--ink) 70%, transparent 100%);
+    display: flex;
+    gap: 10px;
+  }
+
+  .btn-log {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-log:active { transform: scale(0.98); }
+  .btn-log:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-discard {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--muted);
+    border-radius: 12px;
+    padding: 16px 18px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  /* ── SETTINGS SCREEN ── */
+  #settingsScreen {
+    background: var(--ink);
+  }
+  #settingsScreen .settings-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 24px 80px;
+  }
+
+  .settings-section {
+    margin-top: 28px;
+  }
+  .settings-section-title {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .settings-card {
+    background: #1a1916;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .settings-row {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .settings-row:last-child { border-bottom: none; }
+
+  .settings-row label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .settings-input {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  .settings-input:focus { border-color: rgba(200,64,26,0.4); }
+  .settings-input::placeholder { color: var(--muted); opacity: 0.5; }
+
+  .settings-hint {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+  }
+  .settings-hint a { color: var(--gold); text-decoration: none; }
+
+  .btn-save {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 15px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    margin-top: 20px;
+    transition: all 0.15s;
+  }
+  .btn-save:active { transform: scale(0.98); }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #1e1c19;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--paper);
+    padding: 12px 20px;
+    border-radius: 24px;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  #toast.success { border-color: rgba(42,157,92,0.4); color: #6dcea0; }
+  #toast.error   { border-color: rgba(200,64,26,0.4); color: var(--accent-light); }
+
+  /* ── LOADING ── */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,14,12,0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    gap: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .loading-overlay.show { opacity: 1; pointer-events: all; }
+
+  .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-text {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── MANUAL ISBN MODAL ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 600;
+    display: flex;
+    align-items: flex-end;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .modal-overlay.show { opacity: 1; pointer-events: all; }
+
+  .modal-sheet {
+    width: 100%;
+    background: #1a1916;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px 20px 0 0;
+    padding: 20px 24px 48px;
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+  }
+  .modal-overlay.show .modal-sheet { transform: translateY(0); }
+
+  .modal-handle {
+    width: 36px; height: 4px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+
+  .modal-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    color: var(--paper);
+    margin-bottom: 6px;
+  }
+  .modal-subtitle {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  .modal-input {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    letter-spacing: 0.06em;
+    outline: none;
+    -webkit-appearance: none;
+  }
+  .modal-input:focus { border-color: rgba(200,64,26,0.5); }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .modal-btn-primary {
+    flex: 1;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .modal-btn-cancel {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--muted);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════════ HOME SCREEN ══════════════ -->
+  <div id="homeScreen" class="screen active">
+    <div class="header">
+      <div>
+        <div class="header-sub">Your Library</div>
+        <div class="wordmark">Book<span>Log</span></div>
+      </div>
+      <button class="settings-btn" onclick="showScreen('settingsScreen')" aria-label="Settings">⚙</button>
+    </div>
+
+    <div class="scroll-area">
+      <div class="scan-hero">
+        <h2>Scan a book.<br><em>Add it instantly.</em></h2>
+        <p>Point at any ISBN barcode on the back cover or spine of your book.</p>
+        <button class="btn-primary" onclick="startScanner()">
+          <span>📷</span> Scan Barcode
+        </button>
+        <button class="btn-secondary" onclick="showManualModal()">
+          ✏ Enter ISBN manually
+        </button>
+      </div>
+
+      <div class="status-strip">
+        <div class="status-pill">
+          <div class="status-dot" id="notionStatusDot"></div>
+          <span class="status-label">Notion</span>
+          <span class="status-val" id="notionStatusVal">Not set</span>
+        </div>
+        <div class="status-pill">
+          <div class="status-dot ok"></div>
+          <span class="status-label">Google Books</span>
+          <span class="status-val">Ready</span>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <span class="section-title">Recent Scans</span>
+        <span class="section-count" id="scanCount">0 books</span>
+      </div>
+      <div class="book-list" id="recentList">
+        <div class="empty-state">
+          <div class="icon">📖</div>
+          Scan your first book to start<br>building your library.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ SCANNER SCREEN ══════════════ -->
+  <div id="scanScreen" class="screen">
+    <div id="video-container">
+      <video id="video" autoplay playsinline muted></video>
+
+      <div class="scanner-header">
+        <button class="back-btn" onclick="stopScanner()">←</button>
+        <span class="scanner-title">Scan ISBN Barcode</span>
+      </div>
+
+      <div class="scan-overlay">
+        <div style="position:relative;">
+          <div class="scan-frame">
+            <div class="scan-line"></div>
+          </div>
+          <div class="scan-frame-bottom" style="position:absolute;bottom:0;left:0;right:0;height:28px;"></div>
+        </div>
+      </div>
+
+      <button class="manual-entry-btn" onclick="stopScanner(); showManualModal();">
+        ✏ Enter ISBN manually
+      </button>
+      <div class="scan-hint">Hold barcode inside the frame</div>
+    </div>
+  </div>
+
+  <!-- ══════════════ RESULT SCREEN ══════════════ -->
+  <div id="resultScreen" class="screen">
+    <div class="result-header">
+      <button class="back-btn" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);" onclick="showScreen('homeScreen')">←</button>
+      <div class="result-header-text">
+        <h2>Book Found</h2>
+        <p>Review &amp; log to Notion</p>
+      </div>
+    </div>
+
+    <div class="scroll-area">
+      <div class="book-preview">
+        <div class="book-cover-large" id="resultCover">📚</div>
+        <div class="book-preview-info">
+          <div class="book-preview-title" id="resultTitle">—</div>
+          <div class="book-preview-author" id="resultAuthor">—</div>
+          <div id="resultGenres"></div>
+        </div>
+      </div>
+
+      <div id="resultIsbn" class="isbn-chip">ISBN: —</div>
+
+      <div class="field-group" id="fieldGroup">
+        <!-- fields rendered by JS -->
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn-discard" onclick="showScreen('homeScreen')">✕</button>
+      <button class="btn-log" id="logBtn" onclick="logToNotion()">
+        <span>🔗</span> Log to Notion
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════ SETTINGS SCREEN ══════════════ -->
+  <div id="settingsScreen" class="screen">
+    <div class="header">
+      <div>
+        <div class="header-sub">Configuration</div>
+        <div class="wordmark">Settings</div>
+      </div>
+      <button class="settings-btn" onclick="showScreen('homeScreen')" aria-label="Back">✕</button>
+    </div>
+
+    <div class="settings-scroll">
+      <div class="settings-section">
+        <div class="settings-section-title">Notion Connection</div>
+        <div class="settings-card">
+          <div class="settings-row">
+            <label>Integration Token</label>
+            <input class="settings-input" id="s-token" type="password" placeholder="secret_xxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+            <div class="settings-hint">
+              Get yours at <a href="https://www.notion.so/my-integrations" target="_blank">notion.so/my-integrations</a>.<br>
+              Create a new integration → copy the token.
+            </div>
+          </div>
+          <div class="settings-row">
+            <label>Database ID</label>
+            <input class="settings-input" id="s-dbid" type="text" placeholder="32-character ID from your Notion URL" autocomplete="off" spellcheck="false">
+            <div class="settings-hint">
+              Open your Notion database → copy the URL.<br>
+              The ID is the part after the last <code style="color:var(--gold)">/</code> and before the <code style="color:var(--gold)">?</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Notion Database Setup</div>
+        <div class="settings-card">
+          <div class="settings-row">
+            <div class="settings-hint" style="font-size:11px;line-height:1.7;color:var(--paper);opacity:0.7;">
+              Your Notion database needs these columns:<br><br>
+              <strong style="color:var(--gold)">Title</strong> → Title (default, already exists)<br>
+              <strong style="color:var(--gold)">Author</strong> → Text<br>
+              <strong style="color:var(--gold)">Genre</strong> → Text<br>
+              <strong style="color:var(--gold)">Published</strong> → Text<br>
+              <strong style="color:var(--gold)">Publisher</strong> → Text<br>
+              <strong style="color:var(--gold)">ISBN</strong> → Text<br>
+              <strong style="color:var(--gold)">Description</strong> → Text<br>
+              <strong style="color:var(--gold)">Cover URL</strong> → URL<br>
+              <strong style="color:var(--gold)">Date Added</strong> → Date<br>
+              <br>
+              Column names must match exactly (case-sensitive).
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+
+      <div style="margin-top:20px;text-align:center;font-size:10px;color:var(--muted);letter-spacing:0.06em;line-height:1.7;">
+        BookLog v1.0 · Your credentials are stored<br>only on this device (localStorage).
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Looking up book…</div>
+</div>
+
+<!-- Manual ISBN modal -->
+<div class="modal-overlay" id="manualModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Enter ISBN</div>
+    <div class="modal-subtitle">Type the 10 or 13 digit ISBN number found on the back of the book or copyright page.</div>
+    <input class="modal-input" id="manualIsbnInput" type="number" inputmode="numeric" placeholder="9780000000000">
+    <div class="modal-actions">
+      <button class="modal-btn-cancel" onclick="hideManualModal()">Cancel</button>
+      <button class="modal-btn-primary" onclick="submitManualIsbn()">Look Up →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════
+let currentBook = null;
+let recentScans = JSON.parse(localStorage.getItem('booklog_recent') || '[]');
+let codeReader = null;
+let scanActive = false;
+
+// ═══════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════
+function init() {
+  loadSettingsToForm();
+  updateNotionStatus();
+  renderRecentList();
+}
+
+// ═══════════════════════════════════════════════════
+//  SCREEN NAVIGATION
+// ═══════════════════════════════════════════════════
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════
+//  SETTINGS
+// ═══════════════════════════════════════════════════
+function saveSettings() {
+  const token = document.getElementById('s-token').value.trim();
+  const dbid  = document.getElementById('s-dbid').value.trim();
+  if (!token || !dbid) { toast('Please fill in both fields', 'error'); return; }
+  localStorage.setItem('booklog_token', token);
+  localStorage.setItem('booklog_dbid', dbid);
+  updateNotionStatus();
+  toast('Settings saved ✓', 'success');
+  setTimeout(() => showScreen('homeScreen'), 800);
+}
+
+function loadSettingsToForm() {
+  const t = localStorage.getItem('booklog_token') || '';
+  const d = localStorage.getItem('booklog_dbid') || '';
+  document.getElementById('s-token').value = t;
+  document.getElementById('s-dbid').value  = d;
+}
+
+function updateNotionStatus() {
+  const token = localStorage.getItem('booklog_token');
+  const dbid  = localStorage.getItem('booklog_dbid');
+  const dot = document.getElementById('notionStatusDot');
+  const val = document.getElementById('notionStatusVal');
+  if (token && dbid) {
+    dot.className = 'status-dot ok';
+    val.textContent = '···' + dbid.slice(-6);
+  } else {
+    dot.className = 'status-dot err';
+    val.textContent = 'Not set';
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  SCANNER
+// ═══════════════════════════════════════════════════
+async function startScanner() {
+  showScreen('scanScreen');
+  scanActive = true;
+
+  try {
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const videoEl = document.getElementById('video');
+    videoEl.srcObject = stream;
+    await videoEl.play();
+
+    // poll for barcodes
+    const canvas = document.createElement('canvas');
+    const ctx    = canvas.getContext('2d');
+    const hints  = new Map();
+    const formats = [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.QR_CODE
+    ];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    codeReader = new ZXing.BrowserMultiFormatReader(hints);
+
+    const tick = async () => {
+      if (!scanActive) return;
+      if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+        canvas.width  = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const lum = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+        const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+        try {
+          const result = codeReader.decode(bmp);
+          if (result) {
+            stopScanner();
+            handleBarcode(result.text);
+            return;
+          }
+        } catch(e) { /* no code found this frame */ }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+
+  } catch(err) {
+    stopScanner();
+    if (err.name === 'NotAllowedError') {
+      toast('Camera permission denied', 'error');
+    } else {
+      toast('Camera unavailable', 'error');
+    }
+  }
+}
+
+function stopScanner() {
+  scanActive = false;
+  const videoEl = document.getElementById('video');
+  if (videoEl.srcObject) {
+    videoEl.srcObject.getTracks().forEach(t => t.stop());
+    videoEl.srcObject = null;
+  }
+  showScreen('homeScreen');
+}
+
+// ═══════════════════════════════════════════════════
+//  MANUAL ISBN
+// ═══════════════════════════════════════════════════
+function showManualModal() {
+  document.getElementById('manualModal').classList.add('show');
+  setTimeout(() => document.getElementById('manualIsbnInput').focus(), 300);
+}
+function hideManualModal() {
+  document.getElementById('manualModal').classList.remove('show');
+  document.getElementById('manualIsbnInput').value = '';
+}
+function submitManualIsbn() {
+  const val = document.getElementById('manualIsbnInput').value.trim();
+  if (!val || (val.length !== 10 && val.length !== 13)) {
+    toast('ISBN must be 10 or 13 digits', 'error');
+    return;
+  }
+  hideManualModal();
+  handleBarcode(val);
+}
+
+// ═══════════════════════════════════════════════════
+//  BARCODE → BOOK LOOKUP
+// ═══════════════════════════════════════════════════
+async function handleBarcode(code) {
+  showLoading('Looking up book…');
+  try {
+    const isbn = code.replace(/[^0-9X]/gi,'');
+    const url  = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`;
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (!data.items || data.items.length === 0) {
+      hideLoading();
+      toast('No book found for this ISBN', 'error');
+      return;
+    }
+
+    const vol  = data.items[0].volumeInfo;
+    currentBook = {
+      isbn,
+      title:       vol.title || 'Unknown Title',
+      subtitle:    vol.subtitle || '',
+      authors:     (vol.authors || []).join(', '),
+      publisher:   vol.publisher || '',
+      published:   vol.publishedDate || '',
+      description: (vol.description || '').substring(0, 600),
+      genres:      (vol.categories || []).join(', '),
+      pageCount:   vol.pageCount ? String(vol.pageCount) : '',
+      language:    vol.language || '',
+      coverUrl:    vol.imageLinks ? (vol.imageLinks.thumbnail || vol.imageLinks.smallThumbnail || '') : '',
+      googleId:    data.items[0].id,
+    };
+
+    hideLoading();
+    showResultScreen();
+  } catch(err) {
+    hideLoading();
+    toast('Lookup failed — check connection', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  RESULT SCREEN
+// ═══════════════════════════════════════════════════
+function showResultScreen() {
+  if (!currentBook) return;
+  const b = currentBook;
+
+  // cover
+  const coverEl = document.getElementById('resultCover');
+  if (b.coverUrl) {
+    coverEl.innerHTML = `<img src="${b.coverUrl.replace('http:','https:')}" alt="cover">`;
+  } else {
+    coverEl.innerHTML = '📚';
+  }
+
+  document.getElementById('resultTitle').textContent  = b.title;
+  document.getElementById('resultAuthor').textContent = b.authors || '—';
+  document.getElementById('resultIsbn').textContent   = 'ISBN: ' + b.isbn;
+
+  // genre badges
+  const genreEl = document.getElementById('resultGenres');
+  genreEl.innerHTML = b.genres
+    ? b.genres.split(',').slice(0,3).map(g => `<span class="book-preview-genre">${g.trim()}</span>`).join('')
+    : '';
+
+  // editable fields
+  const fields = [
+    { key:'title',       label:'Title',       val:b.title },
+    { key:'authors',     label:'Author',      val:b.authors },
+    { key:'published',   label:'Published',   val:b.published },
+    { key:'publisher',   label:'Publisher',   val:b.publisher },
+    { key:'genres',      label:'Genre',       val:b.genres },
+    { key:'pageCount',   label:'Pages',       val:b.pageCount },
+    { key:'description', label:'Description', val:b.description, textarea:true },
+  ];
+
+  document.getElementById('fieldGroup').innerHTML = fields.map(f => `
+    <div class="field-row">
+      <div class="field-label">${f.label}</div>
+      ${f.textarea
+        ? `<textarea class="field-input" id="field-${f.key}" rows="4">${f.val}</textarea>`
+        : `<input class="field-input" id="field-${f.key}" type="text" value="${escHtml(f.val)}">`}
+    </div>
+  `).join('');
+
+  showScreen('resultScreen');
+}
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════════
+//  LOG TO NOTION
+// ═══════════════════════════════════════════════════
+async function logToNotion() {
+  const token = localStorage.getItem('booklog_token');
+  const dbid  = localStorage.getItem('booklog_dbid');
+
+  if (!token || !dbid) {
+    toast('Set up Notion in Settings first', 'error');
+    showScreen('settingsScreen');
+    return;
+  }
+
+  // read edited values from fields
+  const getValue = id => (document.getElementById(id)||{}).value || '';
+  const bookData = {
+    title:       getValue('field-title')       || currentBook.title,
+    authors:     getValue('field-authors')     || currentBook.authors,
+    published:   getValue('field-published')   || currentBook.published,
+    publisher:   getValue('field-publisher')   || currentBook.publisher,
+    genres:      getValue('field-genres')      || currentBook.genres,
+    pageCount:   getValue('field-pageCount')   || currentBook.pageCount,
+    description: getValue('field-description') || currentBook.description,
+    isbn:        currentBook.isbn,
+    coverUrl:    currentBook.coverUrl,
+  };
+
+  showLoading('Logging to Notion…');
+  document.getElementById('logBtn').disabled = true;
+
+  const props = {
+    "Title": {
+      title: [{ text: { content: bookData.title } }]
+    },
+    "Author": {
+      rich_text: [{ text: { content: bookData.authors } }]
+    },
+    "Genre": {
+      rich_text: [{ text: { content: bookData.genres } }]
+    },
+    "Published": {
+      rich_text: [{ text: { content: bookData.published } }]
+    },
+    "Publisher": {
+      rich_text: [{ text: { content: bookData.publisher } }]
+    },
+    "ISBN": {
+      rich_text: [{ text: { content: bookData.isbn } }]
+    },
+    "Description": {
+      rich_text: [{ text: { content: bookData.description.substring(0, 2000) } }]
+    },
+    "Date Added": {
+      date: { start: new Date().toISOString().split('T')[0] }
+    }
+  };
+
+  if (bookData.coverUrl) {
+    props["Cover URL"] = { url: bookData.coverUrl.replace('http:','https:') };
+  }
+
+  try {
+    const res = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Notion-Version': '2022-06-28',
+      },
+      body: JSON.stringify({
+        parent: { database_id: dbid },
+        cover: bookData.coverUrl ? { type: 'external', external: { url: bookData.coverUrl.replace('http:','https:') } } : undefined,
+        properties: props
+      })
+    });
+
+    const json = await res.json();
+    hideLoading();
+    document.getElementById('logBtn').disabled = false;
+
+    if (res.ok) {
+      // save to recent
+      const scan = {
+        title:     bookData.title,
+        authors:   bookData.authors,
+        genres:    bookData.genres,
+        coverUrl:  bookData.coverUrl,
+        isbn:      bookData.isbn,
+        addedAt:   new Date().toISOString(),
+        notionOk:  true,
+        notionUrl: json.url || '',
+      };
+      recentScans.unshift(scan);
+      if (recentScans.length > 30) recentScans = recentScans.slice(0,30);
+      localStorage.setItem('booklog_recent', JSON.stringify(recentScans));
+
+      toast('Logged to Notion ✓', 'success');
+      setTimeout(() => {
+        renderRecentList();
+        showScreen('homeScreen');
+      }, 1000);
+    } else {
+      const msg = json.message || 'Notion error';
+      toast(msg.substring(0,60), 'error');
+    }
+  } catch(err) {
+    hideLoading();
+    document.getElementById('logBtn').disabled = false;
+    toast('Network error — try again', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  RECENT LIST
+// ═══════════════════════════════════════════════════
+function renderRecentList() {
+  const el = document.getElementById('recentList');
+  const countEl = document.getElementById('scanCount');
+  countEl.textContent = recentScans.length + (recentScans.length === 1 ? ' book' : ' books');
+
+  if (recentScans.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📖</div>Scan your first book to start<br>building your library.</div>`;
+    return;
+  }
+
+  el.innerHTML = recentScans.map(s => {
+    const date = new Date(s.addedAt).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+    const coverHtml = s.coverUrl
+      ? `<div class="book-thumb"><img src="${s.coverUrl.replace('http:','https:')}" alt="cover" loading="lazy"></div>`
+      : `<div class="book-thumb">📚</div>`;
+    const genre = s.genres ? s.genres.split(',')[0].trim() : '';
+    return `
+      <div class="book-card">
+        ${coverHtml}
+        <div class="book-info">
+          <div class="book-title">${escHtml(s.title)}</div>
+          <div class="book-author">${escHtml(s.authors)}</div>
+          ${genre ? `<div class="book-badge">${escHtml(genre)}</div>` : ''}
+        </div>
+        <div class="book-meta-right">
+          <div class="book-date">${date}</div>
+          <div class="notion-check ${s.notionOk?'':'pending'}">${s.notionOk ? '✓ Notion' : '⏳'}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════════
+function showLoading(msg) {
+  document.getElementById('loadingText').textContent = msg || 'Loading…';
+  document.getElementById('loadingOverlay').classList.add('show');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('show');
+}
+
+let toastTimer;
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 2800);
+}
+
+// close modal on backdrop tap
+document.getElementById('manualModal').addEventListener('click', function(e) {
+  if (e.target === this) hideManualModal();
+});
+
+// ═══════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>
