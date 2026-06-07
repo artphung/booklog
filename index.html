@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 
-<!-- ZXing barcode library -->
-<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+<!-- html5-qrcode: iOS Safari compatible barcode scanner -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
 <style>
   :root {
@@ -39,6 +39,15 @@
     font-family: var(--font-mono);
     overflow: hidden;
   }
+
+  /* suppress html5-qrcode default UI */
+  #qr-reader { border: none !important; }
+  #qr-reader video { width: 100% !important; height: 100vh !important; object-fit: cover !important; }
+  #qr-reader img { display: none !important; }
+  #qr-reader__dashboard { display: none !important; }
+  #qr-reader__status_span { display: none !important; }
+  #qr-reader__camera_selection { display: none !important; }
+  #qr-reader__filescan_input { display: none !important; }
 
   /* ── APP SHELL ── */
   #app {
@@ -958,14 +967,15 @@
   <!-- ══════════════ SCANNER SCREEN ══════════════ -->
   <div id="scanScreen" class="screen">
     <div id="video-container">
-      <video id="video" autoplay playsinline muted></video>
+      <!-- html5-qrcode mounts its own video element here -->
+      <div id="qr-reader" style="width:100%;height:100%;"></div>
 
       <div class="scanner-header">
         <button class="back-btn" onclick="stopScanner()">←</button>
         <span class="scanner-title">Scan ISBN Barcode</span>
       </div>
 
-      <div class="scan-overlay">
+      <div class="scan-overlay" style="pointer-events:none;">
         <div style="position:relative;">
           <div class="scan-frame">
             <div class="scan-line"></div>
@@ -1110,7 +1120,6 @@
 // ═══════════════════════════════════════════════════
 let currentBook = null;
 let recentScans = JSON.parse(localStorage.getItem('booklog_recent') || '[]');
-let codeReader = null;
 let scanActive = false;
 
 // ═══════════════════════════════════════════════════
@@ -1168,70 +1177,66 @@ function updateNotionStatus() {
 // ═══════════════════════════════════════════════════
 //  SCANNER
 // ═══════════════════════════════════════════════════
+let html5QrCode = null;
+
 async function startScanner() {
   showScreen('scanScreen');
   scanActive = true;
 
+  // Small delay so the screen transition completes before mounting
+  await new Promise(r => setTimeout(r, 120));
+
   try {
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    const videoEl = document.getElementById('video');
-    videoEl.srcObject = stream;
-    await videoEl.play();
+    html5QrCode = new Html5Qrcode("qr-reader");
 
-    // poll for barcodes
-    const canvas = document.createElement('canvas');
-    const ctx    = canvas.getContext('2d');
-    const hints  = new Map();
-    const formats = [
-      ZXing.BarcodeFormat.EAN_13,
-      ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.CODE_128,
-      ZXing.BarcodeFormat.QR_CODE
-    ];
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-    codeReader = new ZXing.BrowserMultiFormatReader(hints);
-
-    const tick = async () => {
-      if (!scanActive) return;
-      if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        canvas.width  = videoEl.videoWidth;
-        canvas.height = videoEl.videoHeight;
-        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const lum = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
-        const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-        try {
-          const result = codeReader.decode(bmp);
-          if (result) {
-            stopScanner();
-            handleBarcode(result.text);
-            return;
-          }
-        } catch(e) { /* no code found this frame */ }
+    const config = {
+      fps: 15,
+      qrbox: { width: 260, height: 140 },
+      aspectRatio: window.innerHeight / window.innerWidth,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+      ],
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      videoConstraints: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 },
       }
-      requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
 
+    await html5QrCode.start(
+      { facingMode: { ideal: 'environment' } },
+      config,
+      (decodedText) => {
+        if (!scanActive) return;
+        stopScanner();
+        handleBarcode(decodedText);
+      },
+      (errorMsg) => { /* per-frame decode failures — normal, ignore */ }
+    );
   } catch(err) {
-    stopScanner();
-    if (err.name === 'NotAllowedError') {
+    scanActive = false;
+    if (err && (err.toString().includes('Permission') || err.toString().includes('NotAllowed'))) {
       toast('Camera permission denied', 'error');
     } else {
-      toast('Camera unavailable', 'error');
+      toast('Camera unavailable — use manual entry', 'error');
     }
+    showScreen('homeScreen');
   }
 }
 
-function stopScanner() {
+async function stopScanner() {
   scanActive = false;
-  const videoEl = document.getElementById('video');
-  if (videoEl.srcObject) {
-    videoEl.srcObject.getTracks().forEach(t => t.stop());
-    videoEl.srcObject = null;
+  if (html5QrCode) {
+    try {
+      await html5QrCode.stop();
+      html5QrCode.clear();
+    } catch(e) { /* already stopped */ }
+    html5QrCode = null;
   }
   showScreen('homeScreen');
 }
