@@ -1269,86 +1269,160 @@ async function handleBarcode(code) {
   showLoading('Looking up book…');
   const isbn = code.replace(/[^0-9X]/gi,'');
 
-  // Try Google Books first, then Open Library as fallback
-  let book = await lookupGoogleBooks(isbn);
+  let book = null;
+  let debugInfo = [];
+
+  // --- Source 1: Google Books ---
+  try {
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`;
+    const res  = await fetch(url);
+    const text = await res.text();
+    debugInfo.push(`Google Books HTTP ${res.status}`);
+    if (res.ok) {
+      const data = JSON.parse(text);
+      if (data.items && data.items.length > 0) {
+        const vol = data.items[0].volumeInfo;
+        book = {
+          isbn,
+          title:       vol.title || '',
+          subtitle:    vol.subtitle || '',
+          authors:     (vol.authors || []).join(', '),
+          publisher:   vol.publisher || '',
+          published:   vol.publishedDate || '',
+          description: (vol.description || '').substring(0, 600),
+          genres:      (vol.categories || []).join(', '),
+          pageCount:   vol.pageCount ? String(vol.pageCount) : '',
+          language:    vol.language || '',
+          coverUrl:    vol.imageLinks ? (vol.imageLinks.thumbnail || vol.imageLinks.smallThumbnail || '') : '',
+          googleId:    data.items[0].id,
+          source:      'Google Books',
+        };
+        debugInfo.push('Google Books: found!');
+      } else {
+        debugInfo.push(`Google Books: 0 items (totalItems=${data.totalItems})`);
+      }
+    } else {
+      debugInfo.push(`Google Books error body: ${text.substring(0,120)}`);
+    }
+  } catch(e) {
+    debugInfo.push(`Google Books exception: ${e.message}`);
+  }
+
+  // --- Source 2: Open Library ---
   if (!book) {
     showLoading('Trying Open Library…');
-    book = await lookupOpenLibrary(isbn);
+    try {
+      const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
+      const res  = await fetch(url);
+      const text = await res.text();
+      debugInfo.push(`Open Library HTTP ${res.status}`);
+      if (res.ok) {
+        const data = JSON.parse(text);
+        const key  = `ISBN:${isbn}`;
+        if (data[key]) {
+          const b         = data[key];
+          const authors   = (b.authors || []).map(a => a.name).join(', ');
+          const publisher = (b.publishers || []).map(p => p.name).join(', ');
+          const subjects  = (b.subjects || []).slice(0,3).map(s => s.name || s).join(', ');
+          const coverUrl  = b.cover ? (b.cover.large || b.cover.medium || b.cover.small || '') : '';
+          book = {
+            isbn,
+            title:       b.title || '',
+            subtitle:    b.subtitle || '',
+            authors, publisher,
+            published:   b.publish_date || '',
+            description: b.notes ? (typeof b.notes === 'string' ? b.notes : b.notes.value || '') : '',
+            genres:      subjects,
+            pageCount:   b.number_of_pages ? String(b.number_of_pages) : '',
+            language:    '', coverUrl, googleId: '',
+            source:      'Open Library',
+          };
+          debugInfo.push('Open Library: found!');
+        } else {
+          debugInfo.push(`Open Library: key "${key}" not in response. Keys: ${Object.keys(data).join(', ') || 'none'}`);
+        }
+      } else {
+        debugInfo.push(`Open Library error: ${text.substring(0,120)}`);
+      }
+    } catch(e) {
+      debugInfo.push(`Open Library exception: ${e.message}`);
+    }
+  }
+
+  // --- Source 3: Open Library Search fallback ---
+  if (!book) {
+    showLoading('Trying search fallback…');
+    try {
+      const url = `https://openlibrary.org/search.json?isbn=${isbn}&limit=1`;
+      const res  = await fetch(url);
+      const text = await res.text();
+      debugInfo.push(`OL Search HTTP ${res.status}`);
+      if (res.ok) {
+        const data = JSON.parse(text);
+        if (data.docs && data.docs.length > 0) {
+          const d = data.docs[0];
+          book = {
+            isbn,
+            title:       d.title || '',
+            subtitle:    '',
+            authors:     (d.author_name || []).join(', '),
+            publisher:   (d.publisher || []).join(', '),
+            published:   d.first_publish_year ? String(d.first_publish_year) : '',
+            description: '',
+            genres:      (d.subject || []).slice(0,3).join(', '),
+            pageCount:   d.number_of_pages_median ? String(d.number_of_pages_median) : '',
+            language:    '',
+            coverUrl:    d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : '',
+            googleId:    '',
+            source:      'Open Library Search',
+          };
+          debugInfo.push('OL Search: found!');
+        } else {
+          debugInfo.push(`OL Search: 0 docs (numFound=${data.numFound})`);
+        }
+      } else {
+        debugInfo.push(`OL Search error: ${text.substring(0,80)}`);
+      }
+    } catch(e) {
+      debugInfo.push(`OL Search exception: ${e.message}`);
+    }
   }
 
   hideLoading();
 
+  // Always show result screen — prefilled if found, blank if not
+  currentBook = book || {
+    isbn, title: '', subtitle: '', authors: '', publisher: '',
+    published: '', description: '', genres: '',
+    pageCount: '', language: '', coverUrl: '', googleId: '', source: 'manual',
+  };
+
   if (!book) {
-    // Nothing found — still let the user log it manually with the ISBN pre-filled
-    currentBook = {
-      isbn,
-      title: '', subtitle: '', authors: '', publisher: '',
-      published: '', description: '', genres: '',
-      pageCount: '', language: '', coverUrl: '', googleId: '',
-    };
-    toast('Book not found — fill in details manually', 'error');
-    showResultScreen();
-    return;
+    // Show debug info so we know exactly what went wrong
+    const msg = debugInfo.join(' | ');
+    showDebugAlert(`ISBN: ${isbn}\n\n${debugInfo.map((d,i) => `${i+1}. ${d}`).join('\n')}\n\nYou can fill in details manually below.`);
   }
 
-  currentBook = book;
   showResultScreen();
 }
 
-async function lookupGoogleBooks(isbn) {
-  try {
-    const res  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
-    const data = await res.json();
-    if (!data.items || data.items.length === 0) return null;
-    const vol = data.items[0].volumeInfo;
-    return {
-      isbn,
-      title:       vol.title || '',
-      subtitle:    vol.subtitle || '',
-      authors:     (vol.authors || []).join(', '),
-      publisher:   vol.publisher || '',
-      published:   vol.publishedDate || '',
-      description: (vol.description || '').substring(0, 600),
-      genres:      (vol.categories || []).join(', '),
-      pageCount:   vol.pageCount ? String(vol.pageCount) : '',
-      language:    vol.language || '',
-      coverUrl:    vol.imageLinks ? (vol.imageLinks.thumbnail || vol.imageLinks.smallThumbnail || '') : '',
-      googleId:    data.items[0].id,
-      source:      'Google Books',
-    };
-  } catch(e) { return null; }
-}
+function showDebugAlert(msg) {
+  // Create a visible on-screen debug panel instead of a toast
+  const existing = document.getElementById('debugPanel');
+  if (existing) existing.remove();
 
-async function lookupOpenLibrary(isbn) {
-  try {
-    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-    const data = await res.json();
-    const key  = `ISBN:${isbn}`;
-    if (!data[key]) return null;
-    const b = data[key];
-
-    const authors   = (b.authors || []).map(a => a.name).join(', ');
-    const publisher = (b.publishers || []).map(p => p.name).join(', ');
-    const subjects  = (b.subjects || []).slice(0,3).map(s => s.name || s).join(', ');
-    const published = b.publish_date || '';
-    const coverUrl  = b.cover ? (b.cover.large || b.cover.medium || b.cover.small || '') : '';
-
-    return {
-      isbn,
-      title:       b.title || '',
-      subtitle:    b.subtitle || '',
-      authors,
-      publisher,
-      published,
-      description: b.notes ? (typeof b.notes === 'string' ? b.notes : b.notes.value || '') : '',
-      genres:      subjects,
-      pageCount:   b.number_of_pages ? String(b.number_of_pages) : '',
-      language:    '',
-      coverUrl,
-      googleId:    '',
-      source:      'Open Library',
-    };
-  } catch(e) { return null; }
+  const panel = document.createElement('div');
+  panel.id = 'debugPanel';
+  panel.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: #1a0a05; border-bottom: 2px solid #c8401a;
+    padding: 52px 16px 16px; font-family: monospace; font-size: 11px;
+    color: #e8b49a; line-height: 1.6; white-space: pre-wrap;
+    max-height: 60vh; overflow-y: auto;
+  `;
+  panel.textContent = '⚠ DEBUG INFO (tap to dismiss)\n\n' + msg;
+  panel.onclick = () => panel.remove();
+  document.body.appendChild(panel);
 }
 
 // ═══════════════════════════════════════════════════
